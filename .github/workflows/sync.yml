@@ -1,18 +1,15 @@
 name: Sync
 on:
-  push:
-    branches: ["master"]
   schedule:
-    - cron: "0 0 * * *"
+    - cron: '0 0 * * *'
 jobs:
-  repo-sync:
-    name: Repo Sync
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: repo-sync/github-sync@v2
-        name: Sync repo to branch
-        with:
-          source_repo: https://github.com/TBXark/ChatGPT-Telegram-Workers.git
-          source_branch: master
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Sync
+      uses: repo-sync/github-sync@v2
+      with:
+        source_repo: 'https://github.com/TBXark/ChatGPT-Telegram-Workers'
+        target_repo: 'https://github.com/LeiHao0/ChatGPT-Telegram-Workers'
+        github_token: ${{ secrets.GITHUB_TOKEN }} 
+        source_branch: 'master'
