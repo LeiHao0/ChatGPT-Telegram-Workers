@@ -9,7 +9,7 @@ jobs:
     - name: Sync
       uses: repo-sync/github-sync@v2
       with:
-        source_repo: 'https://github.com/TBXark/ChatGPT-Telegram-Workers'
+        source_repo: 'https://github.com/TBXark/ChatGPT-Telegram-Workers.git'
 #         target_repo: 'https://github.com/LeiHao0/ChatGPT-Telegram-Workers'
         github_token: ${{ secrets.GITHUB_TOKEN }} 
         source_branch: 'master'
