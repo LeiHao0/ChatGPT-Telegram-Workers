@@ -1,13 +1,17 @@
 name: Sync
+
 on:
   schedule:
     - cron: '0 0 * * *'
+    
 jobs:
-  sync:
+  repo-sync:
+    name: Repo Sync
     runs-on: ubuntu-latest
     steps:
-    - name: Sync
-      uses: repo-sync/github-sync@v2
+    - uses: actions/checkout@v3
+    - uses: repo-sync/github-sync@v2
+      name: Sync repo to branch
       with:
         source_repo: TBXark/ChatGPT-Telegram-Workers
         source_branch: master
