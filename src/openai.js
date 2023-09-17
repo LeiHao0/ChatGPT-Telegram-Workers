@@ -40,8 +40,6 @@ function extractContentFromStreamData(stream) {
  * @return {Promise<string>}
  */
 async function requestCompletionsFromOpenAI(message, history, context, onStream) {
-  console.log(`requestCompletionsFromOpenAI: ${message}`);
-  console.log(`history: ${JSON.stringify(history, null, 2)}`);
   const key = context.openAIKeyFromContext();
   const body = {
     model: ENV.CHAT_MODEL,
@@ -49,47 +47,68 @@ async function requestCompletionsFromOpenAI(message, history, context, onStream)
     messages: [...(history || []), {role: 'user', content: message}],
     stream: onStream != null,
   };
-  let resp = await fetch(`${ENV.OPENAI_API_DOMAIN}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
-  });
 
-  if (onStream) {
+  const controller = new AbortController();
+  const {signal} = controller;
+  const timeout = 1000 * 60 * 5;
+  setTimeout(() => controller.abort(), timeout);
+
+  let url = `${ENV.OPENAI_API_DOMAIN}/v1/chat/completions`;
+  let header = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${key}`,
+  }
+  if (ENV.AZURE_COMPLETIONS_API) {
+    url = ENV.AZURE_COMPLETIONS_API;
+    header['api-key'] = key
+    delete header['Authorization']
+    delete body.model
+  }
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: header,
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (onStream && resp.ok && resp.headers.get('content-type').indexOf('text/event-stream') !== -1) {
     const reader = resp.body.getReader({mode: 'byob'});
     const decoder = new TextDecoder('utf-8');
     let data = {done: false};
     let pendingText = '';
     let contentFull = '';
     let lengthDelta = 0;
+    let updateStep = 20;
     while (data.done === false) {
-      data = await reader.readAtLeast(4096, new Uint8Array(5000));
-      pendingText += decoder.decode(data.value);
-      const content = extractContentFromStreamData(pendingText);
-      pendingText = content.pending;
-      lengthDelta += content.content.length;
-      contentFull = contentFull + content.content;
-      if (lengthDelta > 20) {
-        lengthDelta = 0;
-        await onStream(contentFull);
+      try {
+        data = await reader.readAtLeast(4096, new Uint8Array(5000));
+        pendingText += decoder.decode(data.value);
+        const content = extractContentFromStreamData(pendingText);
+        pendingText = content.pending;
+        lengthDelta += content.content.length;
+        contentFull = contentFull + content.content;
+        if (lengthDelta > updateStep) {
+          lengthDelta = 0;
+          updateStep += 5;
+          await onStream(`${contentFull}\n${ENV.I18N.message.loading}...`);
+        }
+      } catch (e) {
+        contentFull += `\n\n[ERROR]: ${e.message}\n\n`;
+        break;
       }
     }
     return contentFull;
   }
 
-  resp = await resp.json();
-  if (resp.error?.message) {
-    if (ENV.DEV_MODE || ENV.DEV_MODE) {
-      throw new Error(`OpenAI API Error\n> ${resp.error.message}\nBody: ${JSON.stringify(body)}`);
+  const result = await resp.json();
+  if (result.error?.message) {
+    if (ENV.DEBUG_MODE || ENV.DEV_MODE) {
+      throw new Error(`OpenAI API Error\n> ${result.error.message}\nBody: ${JSON.stringify(body)}`);
     } else {
-      throw new Error(`OpenAI API Error\n> ${resp.error.message}`);
+      throw new Error(`OpenAI API Error\n> ${result.error.message}`);
     }
   }
-  setTimeout(() => updateBotUsage(resp.usage, context).catch(console.error), 0);
-  return resp.choices[0].message.content;
+  setTimeout(() => updateBotUsage(result.usage, context).catch(console.error), 0);
+  return result.choices[0].message.content;
 }
 
 
@@ -100,7 +119,6 @@ async function requestCompletionsFromOpenAI(message, history, context, onStream)
  * @return {Promise<string>}
  */
 export async function requestImageFromOpenAI(prompt, context) {
-  console.log(`requestImageFromOpenAI: ${prompt}`);
   const key = context.openAIKeyFromContext();
   const body = {
     prompt: prompt,
@@ -119,51 +137,6 @@ export async function requestImageFromOpenAI(prompt, context) {
     throw new Error(`OpenAI API Error\n> ${resp.error.message}`);
   }
   return resp.data[0].url;
-}
-
-
-/**
- * 获取账单
- * @param {Context} context
- * @return {Promise<{totalAmount,totalUsage,remaining,}>}
- */
-export async function requestBill(context) {
-  const apiUrl = ENV.OPENAI_API_DOMAIN;
-  const key = context.openAIKeyFromContext();
-
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const day = date.getDate().toString().padStart(2, '0');
-  const endDate = `${year}-${month}-${day}`;
-  const startDate = `${year}-${month}-01`;
-
-  const urlSub = `${apiUrl}/v1/dashboard/billing/subscription`;
-  const urlUsage = `${apiUrl}/v1/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`;
-  const headers = {
-    'Authorization': 'Bearer ' + key,
-    'Content-Type': 'application/json',
-  };
-
-  try {
-    const subResp = await fetch(urlSub, {headers});
-    const subscriptionData = await subResp.json();
-    const totalAmount = subscriptionData.hard_limit_usd;
-
-    const usageResp = await fetch(urlUsage, {headers});
-    const usageData = await usageResp.json();
-    const totalUsage = usageData.total_usage / 100;
-    const remaining = totalAmount - totalUsage;
-
-    return {
-      totalAmount: totalAmount.toFixed(2),
-      totalUsage: totalUsage.toFixed(2),
-      remaining: remaining.toFixed(2),
-    };
-  } catch (error) {
-    console.error(error);
-  }
-  return {};
 }
 
 /**
